@@ -1,0 +1,11 @@
+.shouts form {overflow:hidden; font-size:120%; padding-right:8em; margin-bottom:10px}
+.shouts form .text {width:99%; float:left; margin:0}
+.shouts form span.button {float:right; margin-right:-7.7em}
+.shouts form span.button input {width:7em}
+.shouts .pInfo {margin-left:10px; margin-right:20px}
+.shouts .pInfo span {margin-left:0}
+.shouts .p, .shouts .p .hdr {margin-bottom:4px}
+.shouts .p .hdr {padding:4px 8px 3px 4px}
+.shouts .p .hdr p a {text-decoration:underline;}
+.shouts .avatar {float:left}
+.shouts p {margin:2px 0 0 0; margin-left:17em}
