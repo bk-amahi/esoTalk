@@ -451,13 +451,15 @@ function link($match, $state)
 {
 	switch ($state) {
 		case LEXER_ENTER:
-			if (!preg_match('`&lt;a +href=(?:&#39;|&quot;)(.+?)(?:&#39;|&quot;)(?: +title=(?:&#39;|&quot;)(.+?)(?:&#39;|&quot;))?&gt;`', $match, $matches)
-				and !preg_match('`\[url=(.+)]`', $match, $matches)
-				and !preg_match('`\[(.+)`', $match, $matches)) return true;
-			$link = $matches[1];
+			if (substr($match, 0, 5) == "&lt;a") {
+				preg_match("`href=(&#39;|&quot;)((?:(?:https?|ftp|feed):\/\/|mailto:|).+?)\\1`", $match, $href);
+				$link = $href[2];
+				if (preg_match("`title=(&#39;|&quot;)(.+?)\\1`", $match, $title)) $title = $title[2];
+			} elseif (substr($match, 0, 5) == "[url=") $link = substr($match, 5, -1);
+			else $link = substr($match, 1);
 			$protocol = "";
-			if (!preg_match("`^((?:https?|file|ftp|feed)://|mailto:)`i", $link)) $protocol = "http://";
-			$this->formatter->output .= "<a href='$protocol$link'" . (isset($matches[2]) ? " title='{$matches[2]}'" : "") . ">";
+			if (!preg_match("`^((?:https?|ftp|feed)://|mailto:)`i", $link)) $protocol = "http://";
+			$this->formatter->output .= "<a href='$protocol$link'" . (isset($title) ? " title='$title'" : "") . ">";
 			break;
 		case LEXER_EXIT:
 			$this->formatter->output .= "</a>";
@@ -480,10 +482,10 @@ function init(&$formatter)
 	$formatter->lexer->mapHandler("link_wiki", "link");
 	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"], "link");
 	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)(?:(?:https?|file|ftp|feed):\/\/)?(?:[\w\-]+\.)+(?:ac|ad|ae|aero|af|ag|ai|al|am|an|ao|aq|ar|arpa|as|asia|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|biz|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cat|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|com|coop|cr|cu|cv|cx|cy|cz|de|dj|dk|dm|do|dz|ec|edu|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gov|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|info|int|io|iq|ir|is|it|je|jm|jo|jobs|jp|ke|kg|kh|ki|km|kn|kp|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|me|mg|mh|mil|mk|ml|mm|mn|mo|mobi|mp|mq|mr|ms|mt|mu|museum|mv|mw|mx|my|mz|na|name|nc|ne|net|nf|ng|ni|nl|no|np|nr|nu|nz|om|org|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|pro|ps|pt|pw|py|qa|re|ro|rs|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tel|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|travel|tt|tv|tw|tz|ua|ug|uk|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)(?:[^\w\s]\S*?)?(?=[\.,?!]*(?:\s|$)|&#39;|&lt;)', $mode, "url");
-		$formatter->lexer->addEntryPattern('&lt;a +href=(?:&#39;|&quot;)(?:(?:https?|file|ftp|feed):\/\/|mailto:|).+?(?:&#39;|&quot;)(?: +title=(?:&#39;|&quot;).+?(?:&#39;|&quot;))?&gt;(?=.*&lt;\/a&gt;)', $mode, "link_html");
-		$formatter->lexer->addEntryPattern('\[url=(?:(?:https?|file|ftp|feed):\/\/|mailto:|).+?](?=.*\[\/url])', $mode, "link_bbcode");
-		$formatter->lexer->addEntryPattern('\[(?:(?:https?|file|ftp|feed):\/\/|mailto:)\S+(?=.*])', $mode, "link_wiki");
+		$formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)(?:(?:https?|ftp|feed):\/\/)?(?:[\w\-]+\.)+(?:ac|ad|ae|aero|af|ag|ai|al|am|an|ao|aq|ar|arpa|as|asia|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|biz|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cat|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|com|coop|cr|cu|cv|cx|cy|cz|de|dj|dk|dm|do|dz|ec|edu|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gov|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|info|int|io|iq|ir|is|it|je|jm|jo|jobs|jp|ke|kg|kh|ki|km|kn|kp|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|me|mg|mh|mil|mk|ml|mm|mn|mo|mobi|mp|mq|mr|ms|mt|mu|museum|mv|mw|mx|my|mz|na|name|nc|ne|net|nf|ng|ni|nl|no|np|nr|nu|nz|om|org|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|pro|ps|pt|pw|py|qa|re|ro|rs|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tel|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|travel|tt|tv|tw|tz|ua|ug|uk|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)(?:[^\w\s]\S*?)?(?=[\.,?!]*(?:\s|$)|&#39;|&lt;)', $mode, "url");
+		$formatter->lexer->addEntryPattern('&lt;a.+?&gt;(?=.*&lt;\/a&gt;)', $mode, "link_html");
+		$formatter->lexer->addEntryPattern('\[url=(?:(?:https?|ftp|feed):\/\/|mailto:|).+?](?=.*\[\/url])', $mode, "link_bbcode");
+		$formatter->lexer->addEntryPattern('\[(?:(?:https?|ftp|feed):\/\/|mailto:)\S+(?=.*])', $mode, "link_wiki");
 	}
 	$formatter->lexer->addExitPattern('&lt;\/a&gt;', "link_html");
 	$formatter->lexer->addExitPattern('\[\/url]', "link_bbcode");
@@ -497,23 +499,51 @@ class Formatter_Image {
 var $formatter;
 var $modes = array("image_html", "image_bbcode1", "image_bbcode2");
 
-function image($match, $state)
+function image_html($match, $state)
 {
-	$matches = preg_match("`&lt;img +src=(?:&#39;|&quot;)(?P<src>.+?)(?:&#39;|&quot;) ");
+	if (preg_match("`src=(&#39;|&quot;)(https?:\/\/[^\s]+?)\\1`", $match, $src)) $src = $src[2];
+	else {
+		$this->formatter->output .= $match;
+		return true;
+	}
+	$alt = $title = "";
+	if (preg_match("`alt=(&#39;|&quot;)(.+?)\\1`", $match, $alt)) $alt = $alt[2];
+	if (preg_match("`title=(&#39;|&quot;)(.+?)\\1`", $match, $title)) $title = $title[2];
+	$this->image($src, $alt, $title);
 	return true;
+}
+
+function image_bbcode1($match, $state)
+{
+	$match = substr($match, 5, -6);
+	$this->image($match);
+	return true;
+}
+
+function image_bbcode2($match, $state)
+{
+	$match = substr(strpbrk($match, ":="), 1, -5);
+	$this->image($match);
+	return true;
+}
+
+function image($src, $alt = "", $title = "")
+{
+	$this->formatter->output .= "<img src='$src'" . (!empty($alt) ? " alt='$alt'" : "") . (!empty($title) ? " title='$title'" : "") . "/>";
 }
 
 function init(&$formatter)
 {
 	$this->formatter =& $formatter;
 	
-	$formatter->lexer->mapFunction("image", array($this, "image"));
-	$formatter->lexer->mapHandler("image_html", "image");
-	$formatter->lexer->mapHandler("image_bbcode1", "image");
-	$formatter->lexer->mapHandler("image_bbcode2", "image");
+	$formatter->lexer->mapFunction("image_html", array($this, "image_html"));
+	$formatter->lexer->mapFunction("image_bbcode1", array($this, "image_bbcode1"));
+	$formatter->lexer->mapFunction("image_bbcode2", array($this, "image_bbcode2"));
 	$allowedModes = $formatter->getModes($formatter->allowedModes["whitespace"]);
 	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addSpecialPattern('&lt;img \/?&gt;', $mode, "image_html");
+		$formatter->lexer->addSpecialPattern('&lt;img.+?\/?&gt;', $mode, "image_html");
+		$formatter->lexer->addSpecialPattern('\[img]https?:\/\/[^\s]+?\[\/img]', $mode, "image_bbcode1");
+		$formatter->lexer->addSpecialPattern('\[(?:img|image)[:=]https?:\/\/[^\s]+?]', $mode, "image_bbcode2");
 	}
 }
 
