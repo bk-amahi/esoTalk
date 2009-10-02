@@ -875,17 +875,15 @@ function getEditArea($postId, $content)
 // Convert a post from HTML back to formatting code.
 function formatForEditing($string)
 {
-	return $this->esoTalk->formatter->formatForEditing($string);
+	$formatter = new Formatter();
+	return $formatter->revert($string);
 }
 
 // Convert a post from formatting code into HTML.
 function formatForDisplay($string)
 {
 	$formatter = new Formatter();
-	return $formatter->parse($string);
-	//$enabledFormatters = array();
-	//$this->callHook("formatForDisplay", array(&$enabledFormatters));
-	//return $this->esoTalk->formatter->formatForDisplay($string, count($enabledFormatters) ? $enabledFormatters : false);
+	return $formatter->format($string);
 }
 
 // Validate a post - make sure it's not too long, has at least one character, and check for flooding.

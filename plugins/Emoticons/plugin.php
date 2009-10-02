@@ -82,11 +82,12 @@ function init()
 	$this->emoticons["B)"] = "<img src='js/x.gif' style='background-position:0 -580px' alt='B)' class='emoticon'/>";
 	
 	// Add the formatter
-	$this->esoTalk->formatter->addFormatter("emoticons", array($this, "formatEmoticonsForDisplay"), array($this, "formatEmoticonsForEditing"), true);
+	if ($this->esoTalk->action == "conversation")
+		$this->esoTalk->controller->addHook("getPost", array($this, "parseEmoticons"));
 }
 
 // Parse text emoticons into images
-function formatEmoticonsForDisplay(&$string)
+function parseEmoticons(&$controller, &$post, $postData)
 {
 	$from = $to = array();
 	foreach ($this->emoticons as $k => $v) {
@@ -94,20 +95,7 @@ function formatEmoticonsForDisplay(&$string)
 		$from[] = "/(?<=^|[\s.,!<>]){$k}(?=[\s.,!<>)]|$)/i";
 		$to[] = "$v";
 	}
-	$string = preg_replace($from, $to, $string);
-	return $string;	
-}
-
-// Parse image emoticons into text
-function formatEmoticonsForEditing(&$string)
-{
-	$from = $to = array();
-	foreach ($this->emoticons as $k => $v) {
-		$from[] = $v;
-		$to[] = $k;
-	}
-	$string = str_replace($from, $to, $string);
-	return $string;
+	$post["body"] = preg_replace($from, $to, $post["body"]);
 }
 
 }

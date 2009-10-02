@@ -9,6 +9,7 @@ abbr {cursor:help}
 /* Links */
 a {text-decoration:none}
 a:hover {color:#000; text-decoration:underline}
+a:active {color:#666}
 a, .link, .p .hdr a.link {color:#00f}
 
 /* Misc */

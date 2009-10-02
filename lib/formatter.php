@@ -8,7 +8,7 @@ if (!defined("IN_ESOTALK")) exit;
 
 require_once "lexer.php";
 
-class Formatter {
+class Formatter extends Hookable {
 
 var $output = "";
 
@@ -34,63 +34,64 @@ function Formatter()
 	
 	// Define the modes.
 	$this->modes = array(
-		"bold" => new Formatter_Bold(),
-		"italic" => new Formatter_Italic(),
-		"heading" => new Formatter_Heading(),
-		"superscript" => new Formatter_Superscript(),
-		"strikethrough" => new Formatter_Strikethrough(),
-		"link" => new Formatter_Link(),
-		"image" => new Formatter_Image(),
-		"list" => new Formatter_List(),
-		"quote" => new Formatter_Quote(),
-		"fixedBlock" => new Formatter_Fixed_Block(),
-		"fixedInline" => new Formatter_Fixed_Inline(),
-		"horizontalRule" => new Formatter_Horizontal_Rule(),
-		"specialCharacters" => new Formatter_Special_Characters(),
+		"bold" => new Formatter_Bold($this),
+		"italic" => new Formatter_Italic($this),
+		"heading" => new Formatter_Heading($this),
+		"superscript" => new Formatter_Superscript($this),
+		"strikethrough" => new Formatter_Strikethrough($this),
+		"link" => new Formatter_Link($this),
+		"image" => new Formatter_Image($this),
+		"list" => new Formatter_List($this),
+		"quote" => new Formatter_Quote($this),
+		"fixedBlock" => new Formatter_Fixed_Block($this),
+		"fixedInline" => new Formatter_Fixed_Inline($this),
+		"horizontalRule" => new Formatter_Horizontal_Rule($this),
+		"specialCharacters" => new Formatter_Special_Characters($this),
+		"whitespace" => new Formatter_Whitespace($this)
 	);
-	foreach ($this->modes as $k => $v) $this->modes[$k]->init($this);
-	
-	// Whitespace.
-	$allowedModes = $this->getModes($this->allowedModes["whitespace"]);
-	foreach ($allowedModes as $mode) {
-		$this->lexer->addSpecialPattern('\n(?=\n)', $mode, "paragraph");
-		$this->lexer->addSpecialPattern('\n(?!\n)', $mode, "linebreak");
-	}
 }
 
-function parse($string)
+function format($string)
 {
-	// Convert all \r into \n.
-	$string = strtr($string, array("\r\n" => "\n", "\r" => "\n"));
+	// Clean up newline characters - make sure the only ones we are using are \n!
+	$string = strtr($string, array("\r\n" => "\n", "\r" => "\n")) . "\n";
 	
+	// Set up the lexer with all of the different formatting modes.
+	foreach ($this->modes as $k => $v) {
+		if (method_exists($this->modes[$k], "format")) $this->modes[$k]->format();
+	}
+	
+	// Run the lexer!
 	$this->lexer->parse($string);
 	
-	// Strip empty paragraphs.
-	$this->output = "<p>$this->output</p>";
-	$this->output = preg_replace(array("/<p>\s*<\/p>/i", "/(?<=<p>)\s*(?:<br\/>)*/i", "/\s*(?:<br\/>)*\s*(?=<\/p>)/i"), "", $this->output);
-	$this->output = str_replace("<p></p>", "", $this->output);
-	
+	// Run any post-formatting actions.
+	foreach ($this->modes as $k => $v) {
+		if (method_exists($this->modes[$k], "finish")) $this->output = $this->modes[$k]->finish($this->output);
+	}
+
 	return $this->output;
+}
+
+function revert($string)
+{
+	// Collect simple reversion patterns from each of the individual formatters.
+	$translations = array();
+	foreach ($this->modes as $k => $v) if (isset($v->revert) and is_array($v->revert)) $translations += $v->revert;
+	$string = strtr($string, $translations);
+
+	// Run any more complex reversions.
+	foreach ($this->modes as $k => $v) {
+		if (method_exists($this->modes[$k], "revert")) $string = $this->modes[$k]->revert($string);
+	}
+	
+	$string = rtrim($string);
+	return $string;
 }
 
 function text($match, $state) {
  	$this->output .= $match;
  	return true;
 }
-
-function paragraph($match, $state)
-{
-	$this->output .= "</p><p>";
-	return true;
-}
-
-function linebreak($match, $state)
-{
-	$this->output .= "<br/>";
-	return true;
-}
-
-function addFormatter() {}
 
 function getModes($modes, $exclude = false)
 {
@@ -105,10 +106,83 @@ function getModes($modes, $exclude = false)
 
 }
 
-class Formatter_Bold {
+class Formatter_Whitespace {
 
 var $formatter;
+var $revert = array("<br/>" => "\n", "<p>" => "", "</p>" => "\n\n");
+
+function Formatter_Whitespace(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	// Map the different forms to the same mode.
+	$this->formatter->lexer->mapFunction("paragraph", array($this, "paragraph"));
+	$this->formatter->lexer->mapFunction("linebreak", array($this, "linebreak"));
+	// Whitespace.
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["whitespace"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addSpecialPattern('\n(?=\n)', $mode, "paragraph");
+		$this->formatter->lexer->addSpecialPattern('\n(?!\n)', $mode, "linebreak");
+	}
+}
+
+function finish($output)
+{
+	// Strip empty paragraphs.
+	$output = "<p>$output</p>";
+	$output = preg_replace(array("/<p>\s*<\/p>/i", "/(?<=<p>)\s*(?:<br\/>)*/i", "/\s*(?:<br\/>)*\s*(?=<\/p>)/i"), "", $output);
+	$output = str_replace("<p></p>", "", $output);
+	
+	return $output;
+}
+
+function paragraph($match, $state)
+{
+	$this->formatter->output .= "</p><p>";
+	return true;
+}
+
+function linebreak($match, $state)
+{
+	$this->formatter->output .= "<br/>";
+	return true;
+}
+
+}
+
+class Formatter_Bold {
+
 var $modes = array("bold_tag_b", "bold_tag_strong", "bold_bbcode", "bold_wiki");
+var $revert = array("<b>" => "&lt;b&gt;", "</b>" => "&lt;/b&gt;");
+
+function Formatter_Bold(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	// Map the different forms to the same mode.
+	$this->formatter->lexer->mapFunction("bold", array($this, "bold"));
+	$this->formatter->lexer->mapHandler("bold_tag_b", "bold");
+	$this->formatter->lexer->mapHandler("bold_tag_strong", "bold");
+	$this->formatter->lexer->mapHandler("bold_bbcode", "bold");
+	$this->formatter->lexer->mapHandler("bold_wiki", "bold");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"], "bold");
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('&lt;b&gt;(?=.*&lt;\/b&gt;)', $mode, "bold_tag_b");
+		$this->formatter->lexer->addEntryPattern('\[b](?=.*\[\/b])', $mode, "bold_bbcode");
+		$this->formatter->lexer->addEntryPattern('&lt;strong&gt;(?=.*&lt;\/strong&gt;)', $mode, "bold_tag_strong");
+		$this->formatter->lexer->addEntryPattern('&#39;&#39;&#39;(?=.*&#39;&#39;&#39;)', $mode, "bold_wiki");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/b&gt;', "bold_tag_b");
+	$this->formatter->lexer->addExitPattern('\[\/b]', "bold_bbcode");
+	$this->formatter->lexer->addExitPattern('&lt;\/strong&gt;', "bold_tag_strong");
+	$this->formatter->lexer->addExitPattern('&#39;&#39;&#39;', "bold_wiki");
+}
 
 function bold($match, $state)
 {
@@ -120,35 +194,39 @@ function bold($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	// Map the different forms to the same mode.
-	$formatter->lexer->mapFunction("bold", array($this, "bold"));
-	$formatter->lexer->mapHandler("bold_tag_b", "bold");
-	$formatter->lexer->mapHandler("bold_tag_strong", "bold");
-	$formatter->lexer->mapHandler("bold_bbcode", "bold");
-	$formatter->lexer->mapHandler("bold_wiki", "bold");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"], "bold");
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('&lt;b&gt;(?=.*&lt;\/b&gt;)', $mode, "bold_tag_b");
-		$formatter->lexer->addEntryPattern('\[b](?=.*\[\/b])', $mode, "bold_bbcode");
-		$formatter->lexer->addEntryPattern('&lt;strong&gt;(?=.*&lt;\/strong&gt;)', $mode, "bold_tag_strong");
-		$formatter->lexer->addEntryPattern('&#39;&#39;&#39;(?=.*&#39;&#39;&#39;)', $mode, "bold_wiki");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/b&gt;', "bold_tag_b");
-	$formatter->lexer->addExitPattern('\[\/b]', "bold_bbcode");
-	$formatter->lexer->addExitPattern('&lt;\/strong&gt;', "bold_tag_strong");
-	$formatter->lexer->addExitPattern('&#39;&#39;&#39;', "bold_wiki");
-}
-
 }
 
 class Formatter_Italic {
 
 var $formatter;
 var $modes = array("italic_tag_i", "italic_tag_em", "italic_bbcode", "italic_wiki");
+var $revert = array("<i>" => "&lt;i&gt;", "</i>" => "&lt;/i&gt;");
+
+function Formatter_Italic(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	// Map the different forms to the same mode.
+	$this->formatter->lexer->mapFunction("italic", array($this, "italic"));
+	$this->formatter->lexer->mapHandler("italic_tag_i", "italic");
+	$this->formatter->lexer->mapHandler("italic_tag_em", "italic");
+	$this->formatter->lexer->mapHandler("italic_bbcode", "italic");
+	$this->formatter->lexer->mapHandler("italic_wiki", "italic");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"], "italic");
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('&lt;i&gt;(?=.*&lt;\/i&gt;)', $mode, "italic_tag_i");
+		$this->formatter->lexer->addEntryPattern('\[i](?=.*\[\/i])', $mode, "italic_bbcode");
+		$this->formatter->lexer->addEntryPattern('&lt;em&gt;(?=.*&lt;\/em&gt;)', $mode, "italic_tag_em");
+		$this->formatter->lexer->addEntryPattern('&#39;&#39;(?=.*&#39;&#39;)', $mode, "italic_wiki");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/i&gt;', "italic_tag_i");
+	$this->formatter->lexer->addExitPattern('\[\/i]', "italic_bbcode");
+	$this->formatter->lexer->addExitPattern('&lt;\/em&gt;', "italic_tag_em");
+	$this->formatter->lexer->addExitPattern('&#39;&#39;', "italic_wiki");
+}
 
 function italic($match, $state)
 {
@@ -160,35 +238,36 @@ function italic($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	// Map the different forms to the same mode.
-	$formatter->lexer->mapFunction("italic", array($this, "italic"));
-	$formatter->lexer->mapHandler("italic_tag_i", "italic");
-	$formatter->lexer->mapHandler("italic_tag_em", "italic");
-	$formatter->lexer->mapHandler("italic_bbcode", "italic");
-	$formatter->lexer->mapHandler("italic_wiki", "italic");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"], "italic");
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('&lt;i&gt;(?=.*&lt;\/u&gt;)', $mode, "italic_tag_i");
-		$formatter->lexer->addEntryPattern('\[i](?=.*\[\/i])', $mode, "italic_bbcode");
-		$formatter->lexer->addEntryPattern('&lt;em&gt;(?=.*&lt;\/em&gt;)', $mode, "italic_tag_em");
-		$formatter->lexer->addEntryPattern('&#39;&#39;(?=.*&#39;&#39;)', $mode, "italic_wiki");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/i&gt;', "italic_tag_i");
-	$formatter->lexer->addExitPattern('\[\/i]', "italic_bbcode");
-	$formatter->lexer->addExitPattern('&lt;\/em&gt;', "italic_tag_em");
-	$formatter->lexer->addExitPattern('&#39;&#39;', "italic_wiki");
-}
-
 }
 
 class Formatter_Strikethrough {
 
 var $formatter;
 var $modes = array("strike_html", "strike_bbcode", "strike_wiki");
+var $revert = array("<del>" => "&lt;s&gt;", "</del>" => "&lt;/s&gt;");
+
+function Formatter_Strikethrough(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	// Map the different forms to the same mode.
+	$this->formatter->lexer->mapFunction("strike", array($this, "strike"));
+	$this->formatter->lexer->mapHandler("strike_html", "strike");
+	$this->formatter->lexer->mapHandler("strike_bbcode", "strike");
+	$this->formatter->lexer->mapHandler("strike_wiki", "strike");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"], "strike");
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('&lt;s&gt;(?=.*&lt;\/s&gt;)', $mode, "strike_html");
+		$this->formatter->lexer->addEntryPattern('\[s](?=.*\[\/s])', $mode, "strike_bbcode");
+		$this->formatter->lexer->addEntryPattern('-{3,}(?=.*---)', $mode, "strike_wiki");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/s&gt;', "strike_html");
+	$this->formatter->lexer->addExitPattern('\[\/s]', "strike_bbcode");
+	$this->formatter->lexer->addExitPattern('-{3,}', "strike_wiki");
+}
 
 function strike($match, $state)
 {
@@ -200,32 +279,32 @@ function strike($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	// Map the different forms to the same mode.
-	$formatter->lexer->mapFunction("strike", array($this, "strike"));
-	$formatter->lexer->mapHandler("strike_html", "strike");
-	$formatter->lexer->mapHandler("strike_bbcode", "strike");
-	$formatter->lexer->mapHandler("strike_wiki", "strike");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"], "strike");
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('&lt;del&gt;(?=.*&lt;\/del&gt;)', $mode, "strike_html");
-		$formatter->lexer->addEntryPattern('\[s](?=.*\[\/s])', $mode, "strike_bbcode");
-		$formatter->lexer->addEntryPattern('-{3,}(?=.*---)', $mode, "strike_wiki");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/del&gt;', "strike_html");
-	$formatter->lexer->addExitPattern('\[\/s]', "strike_bbcode");
-	$formatter->lexer->addExitPattern('-{3,}', "strike_wiki");
-}
-
 }
 
 class Formatter_Superscript {
 
 var $formatter;
 var $modes = array("superscript", "subscript");
+var $revert = array("<sup>" => "&lt;sup&gt;", "</sup>" => "&lt;/sup&gt;", "<sub>" => "&lt;s&gt;", "</sub>" => "&lt;/s&gt;");
+
+function Formatter_Superscript(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	// Map the different forms to the same mode.
+	$this->formatter->lexer->mapFunction("superscript", array($this, "superscript"));
+	$this->formatter->lexer->mapFunction("subscript", array($this, "subscript"));
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"], "superscript");
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('&lt;sup&gt;(?=.*&lt;\/sup&gt;)', $mode, "superscript");
+		$this->formatter->lexer->addEntryPattern('&lt;sub&gt;(?=.*&lt;\/sub&gt;)', $mode, "subscript");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/sup&gt;', "superscript");
+	$this->formatter->lexer->addExitPattern('&lt;\/sub&gt;', "subscript");
+}
 
 function superscript($match, $state)
 {
@@ -247,28 +326,36 @@ function subscript($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	// Map the different forms to the same mode.
-	$formatter->lexer->mapFunction("superscript", array($this, "superscript"));
-	$formatter->lexer->mapFunction("subscript", array($this, "subscript"));
-	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"], "superscript");
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('&lt;sup&gt;(?=.*&lt;\/sup&gt;)', $mode, "superscript");
-		$formatter->lexer->addEntryPattern('&lt;sub&gt;(?=.*&lt;\/sub&gt;)', $mode, "subscript");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/sup&gt;', "superscript");
-	$formatter->lexer->addExitPattern('&lt;\/sub&gt;', "subscript");
-}
-
 }
 
 class Formatter_Heading {
 
 var $formatter;
 var $modes = array("heading_html", "heading_bbcode", "heading_wiki");
+var $revert = array("<h3>" => "&lt;h1&gt;", "</h3>" => "&lt;/h1&gt;\n\n");
+
+function Formatter_Heading(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{
+	// Map the different forms to the same mode.
+	$this->formatter->lexer->mapFunction("heading", array($this, "heading"));
+	$this->formatter->lexer->mapHandler("heading_html", "heading");
+	$this->formatter->lexer->mapHandler("heading_bbcode", "heading");
+	$this->formatter->lexer->mapHandler("heading_wiki", "heading");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('&lt;h1&gt;(?=.*&lt;\/h1&gt;)', $mode, "heading_html");
+		$this->formatter->lexer->addEntryPattern('\[h](?=.*\[\/h])', $mode, "heading_bbcode");
+		$this->formatter->lexer->addEntryPattern('={3,}(?=.*===)', $mode, "heading_wiki");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/h1&gt;', "heading_html");
+	$this->formatter->lexer->addExitPattern('\[\/h]', "heading_bbcode");
+	$this->formatter->lexer->addExitPattern('={3,}', "heading_wiki");
+}
 
 function heading($match, $state)
 {
@@ -280,32 +367,31 @@ function heading($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	// Map the different forms to the same mode.
-	$formatter->lexer->mapFunction("heading", array($this, "heading"));
-	$formatter->lexer->mapHandler("heading_html", "heading");
-	$formatter->lexer->mapHandler("heading_bbcode", "heading");
-	$formatter->lexer->mapHandler("heading_wiki", "heading");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["block"]);
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('&lt;h1&gt;(?=.*&lt;\/h1&gt;)', $mode, "heading_html");
-		$formatter->lexer->addEntryPattern('\[h](?=.*\[\/h])', $mode, "heading_bbcode");
-		$formatter->lexer->addEntryPattern('={3,}(?=.*===)', $mode, "heading_wiki");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/h1&gt;', "heading_html");
-	$formatter->lexer->addExitPattern('\[\/h]', "heading_bbcode");
-	$formatter->lexer->addExitPattern('={3,}', "heading_wiki");
-}
-
 }
 
 class Formatter_Quote {
 
 var $formatter;
 var $modes = array("quote_html", "quote_bbcode");
+
+function Formatter_Quote(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	$this->formatter->lexer->mapFunction("quote", array($this, "quote"));
+	$this->formatter->lexer->mapHandler("quote_html", "quote");
+	$this->formatter->lexer->mapHandler("quote_bbcode", "quote");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('&lt;blockquote&gt;(?:\s*&lt;cite&gt;(?:.*?)&lt;\/cite&gt;)?(?=.*&lt;\/blockquote&gt;)', $mode, "quote_html");
+		$this->formatter->lexer->addEntryPattern('\[quote(?:[:=](?:.*?))?\](?=.*\[\/quote])', $mode, "quote_bbcode");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/blockquote&gt;', "quote_html");
+	$this->formatter->lexer->addExitPattern('\[\/quote\]', "quote_bbcode");
+}
 
 function quote($match, $state)
 {
@@ -324,20 +410,14 @@ function quote($match, $state)
 	return true;
 }
 
-function init(&$formatter)
+function revert($string)
 {
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("quote", array($this, "quote"));
-	$formatter->lexer->mapHandler("quote_html", "quote");
-	$formatter->lexer->mapHandler("quote_bbcode", "quote");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["block"]);
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('&lt;blockquote&gt;(?:\s*&lt;cite&gt;(?:.*?)&lt;\/cite&gt;)?(?=.*&lt;\/blockquote&gt;)', $mode, "quote_html");
-		$formatter->lexer->addEntryPattern('\[quote(?:[:=](?:.*?))?\](?=.*\[\/quote])', $mode, "quote_bbcode");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/blockquote&gt;', "quote_html");
-	$formatter->lexer->addExitPattern('\[\/quote\]', "quote_bbcode");
+	$callback = create_function('$match', '
+		return "{$match[1]}&lt;blockquote&gt;" . ($match[2] ? "&lt;cite&gt;{$match[2]}&lt;/cite&gt; " : "") . "{$match[3]}&lt;/blockquote&gt;\n\n";
+	');
+	while (preg_match("/<blockquote>.*?<\/blockquote>/s", $string))
+		$string = preg_replace_callback("/(.*?)<blockquote>(?:<cite>(.+?)<\/cite>)?\n*(.*?)\n*<\/blockquote>/is", $callback, $string);
+	return $string;
 }
 
 }
@@ -346,6 +426,29 @@ class Formatter_Fixed_Block {
 
 var $formatter;
 var $modes = array("pre_html_block", "code_html_block", "code_bbcode_block");
+var $revert = array("<pre>" => "&lt;pre&gt;", "</pre>" => "&lt;/pre&gt;\n\n");
+
+function Formatter_Fixed_Block(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	$this->formatter->lexer->mapFunction("fixedBlock", array($this, "fixedBlock"));
+	$this->formatter->lexer->mapHandler("pre_html_block", "fixedBlock");
+	$this->formatter->lexer->mapHandler("code_html_block", "fixedBlock");
+	$this->formatter->lexer->mapHandler("code_bbcode_block", "fixedBlock");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('\n&lt;pre&gt;(?=.*&lt;\/pre&gt;)', $mode, "pre_html_block");
+		$this->formatter->lexer->addEntryPattern('\n&lt;code&gt;(?=.*&lt;\/code&gt;)', $mode, "code_html_block");
+		$this->formatter->lexer->addEntryPattern('\n\[code\](?=.*\[\/code])', $mode, "code_bbcode_block");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/pre&gt;', "pre_html_block");
+	$this->formatter->lexer->addExitPattern('&lt;\/code&gt;', "code_html_block");
+	$this->formatter->lexer->addExitPattern('\[\/code]', "code_bbcode_block");
+}
 
 function fixedBlock($match, $state)
 {
@@ -363,31 +466,35 @@ function fixedBlock($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("fixedBlock", array($this, "fixedBlock"));
-	$formatter->lexer->mapHandler("pre_html_block", "fixedBlock");
-	$formatter->lexer->mapHandler("code_html_block", "fixedBlock");
-	$formatter->lexer->mapHandler("code_bbcode_block", "fixedBlock");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["block"]);
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('\n&lt;pre&gt;(?=.*&lt;\/pre&gt;)', $mode, "pre_html_block");
-		$formatter->lexer->addEntryPattern('\n&lt;code&gt;(?=.*&lt;\/code&gt;)', $mode, "code_html_block");
-		$formatter->lexer->addEntryPattern('\n\[code\](?=.*\[\/code])', $mode, "code_bbcode_block");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/pre&gt;', "pre_html_block");
-	$formatter->lexer->addExitPattern('&lt;\/code&gt;', "code_html_block");
-	$formatter->lexer->addExitPattern('\[\/code]', "code_bbcode_block");
-}
-
 }
 
 class Formatter_Fixed_Inline {
 
 var $formatter;
 var $modes = array("pre_html_inline", "code_html_inline", "code_bbcode_inline");
+var $revert = array("<code>" => "&lt;pre&gt;", "</code>" => "&lt;/pre&gt;");
+
+function Formatter_Fixed_Inline(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	$this->formatter->lexer->mapFunction("fixedInline", array($this, "fixedInline"));
+	$this->formatter->lexer->mapHandler("pre_html_inline", "fixedInline");
+	$this->formatter->lexer->mapHandler("code_html_inline", "fixedInline");
+	$this->formatter->lexer->mapHandler("code_bbcode_inline", "fixedInline");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('&lt;pre&gt;(?=.*&lt;\/pre&gt;)', $mode, "pre_html_inline");
+		$this->formatter->lexer->addEntryPattern('&lt;code&gt;(?=.*&lt;\/code&gt;)', $mode, "code_html_inline");
+		$this->formatter->lexer->addEntryPattern('\[code\](?=.*\[\/code])', $mode, "code_bbcode_inline");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/pre&gt;', "pre_html_inline");
+	$this->formatter->lexer->addExitPattern('&lt;\/code&gt;', "code_html_inline");
+	$this->formatter->lexer->addExitPattern('\[\/code]', "code_bbcode_inline");
+}
 
 function fixedInline($match, $state)
 {
@@ -405,31 +512,36 @@ function fixedInline($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("fixedInline", array($this, "fixedInline"));
-	$formatter->lexer->mapHandler("pre_html_inline", "fixedInline");
-	$formatter->lexer->mapHandler("code_html_inline", "fixedInline");
-	$formatter->lexer->mapHandler("code_bbcode_inline", "fixedInline");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"]);
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('&lt;pre&gt;(?=.*&lt;\/pre&gt;)', $mode, "pre_html_inline");
-		$formatter->lexer->addEntryPattern('&lt;code&gt;(?=.*&lt;\/code&gt;)', $mode, "code_html_inline");
-		$formatter->lexer->addEntryPattern('\[code\](?=.*\[\/code])', $mode, "code_bbcode_inline");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/pre&gt;', "pre_html_inline");
-	$formatter->lexer->addExitPattern('&lt;\/code&gt;', "code_html_inline");
-	$formatter->lexer->addExitPattern('\[\/code]', "code_bbcode_inline");
-}
-
 }
 
 class Formatter_Link {
 
 var $formatter;
 var $modes = array("link_html", "link_bbcode", "link_wiki");
+
+function Formatter_Link(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{
+	$this->formatter->lexer->mapFunction("link", array($this, "link"));
+	$this->formatter->lexer->mapFunction("url", array($this, "url"));
+	$this->formatter->lexer->mapHandler("link_html", "link");
+	$this->formatter->lexer->mapHandler("link_bbcode", "link");
+	$this->formatter->lexer->mapHandler("link_wiki", "link");
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"], "link");
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)(?:(?:https?|ftp|feed):\/\/)?(?:[\w\-]+\.)+(?:ac|ad|ae|aero|af|ag|ai|al|am|an|ao|aq|ar|arpa|as|asia|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|biz|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cat|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|com|coop|cr|cu|cv|cx|cy|cz|de|dj|dk|dm|do|dz|ec|edu|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gov|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|info|int|io|iq|ir|is|it|je|jm|jo|jobs|jp|ke|kg|kh|ki|km|kn|kp|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|me|mg|mh|mil|mk|ml|mm|mn|mo|mobi|mp|mq|mr|ms|mt|mu|museum|mv|mw|mx|my|mz|na|name|nc|ne|net|nf|ng|ni|nl|no|np|nr|nu|nz|om|org|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|pro|ps|pt|pw|py|qa|re|ro|rs|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tel|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|travel|tt|tv|tw|tz|ua|ug|uk|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)(?:[^\w\s]\S*?)?(?=[\.,?!]*(?:\s|$)|&#39;|&lt;)', $mode, "url");
+		$this->formatter->lexer->addEntryPattern('&lt;a.+?&gt;(?=.*&lt;\/a&gt;)', $mode, "link_html");
+		$this->formatter->lexer->addEntryPattern('\[url=(?:(?:https?|ftp|feed):\/\/|mailto:|).+?](?=.*\[\/url])', $mode, "link_bbcode");
+		$this->formatter->lexer->addEntryPattern('\[(?:(?:https?|ftp|feed):\/\/|mailto:)\S+(?=.*])', $mode, "link_wiki");
+	}
+	$this->formatter->lexer->addExitPattern('&lt;\/a&gt;', "link_html");
+	$this->formatter->lexer->addExitPattern('\[\/url]', "link_bbcode");
+	$this->formatter->lexer->addExitPattern(']', "link_wiki");
+}
 
 function url($match, $state)
 {
@@ -454,12 +566,13 @@ function link($match, $state)
 			if (substr($match, 0, 5) == "&lt;a") {
 				preg_match("`href=(&#39;|&quot;)((?:(?:https?|ftp|feed):\/\/|mailto:|).+?)\\1`", $match, $href);
 				$link = $href[2];
-				if (preg_match("`title=(&#39;|&quot;)(.+?)\\1`", $match, $title)) $title = $title[2];
+				if (preg_match("`title=(&#39;|&quot;)(.+?)\\1`", $match, $titleMatch)) $title = $titleMatch[2];
+				if (!empty($title)) $quote = strpos($title, "&#39;") === false ? "'" : '"';
 			} elseif (substr($match, 0, 5) == "[url=") $link = substr($match, 5, -1);
 			else $link = substr($match, 1);
 			$protocol = "";
 			if (!preg_match("`^((?:https?|ftp|feed)://|mailto:)`i", $link)) $protocol = "http://";
-			$this->formatter->output .= "<a href='$protocol$link'" . (isset($title) ? " title='$title'" : "") . ">";
+			$this->formatter->output .= "<a href='$protocol$link'" . (isset($title) ? " title=$quote$title$quote" : "") . ">";
 			break;
 		case LEXER_EXIT:
 			$this->formatter->output .= "</a>";
@@ -471,25 +584,16 @@ function link($match, $state)
 	return true;
 }
 
-function init(&$formatter)
+function revert($string)
 {
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("link", array($this, "link"));
-	$formatter->lexer->mapFunction("url", array($this, "url"));
-	$formatter->lexer->mapHandler("link_html", "link");
-	$formatter->lexer->mapHandler("link_bbcode", "link");
-	$formatter->lexer->mapHandler("link_wiki", "link");
-	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"], "link");
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)(?:(?:https?|ftp|feed):\/\/)?(?:[\w\-]+\.)+(?:ac|ad|ae|aero|af|ag|ai|al|am|an|ao|aq|ar|arpa|as|asia|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|biz|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cat|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|com|coop|cr|cu|cv|cx|cy|cz|de|dj|dk|dm|do|dz|ec|edu|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gov|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|info|int|io|iq|ir|is|it|je|jm|jo|jobs|jp|ke|kg|kh|ki|km|kn|kp|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|me|mg|mh|mil|mk|ml|mm|mn|mo|mobi|mp|mq|mr|ms|mt|mu|museum|mv|mw|mx|my|mz|na|name|nc|ne|net|nf|ng|ni|nl|no|np|nr|nu|nz|om|org|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|pro|ps|pt|pw|py|qa|re|ro|rs|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tel|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|travel|tt|tv|tw|tz|ua|ug|uk|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)(?:[^\w\s]\S*?)?(?=[\.,?!]*(?:\s|$)|&#39;|&lt;)', $mode, "url");
-		$formatter->lexer->addEntryPattern('&lt;a.+?&gt;(?=.*&lt;\/a&gt;)', $mode, "link_html");
-		$formatter->lexer->addEntryPattern('\[url=(?:(?:https?|ftp|feed):\/\/|mailto:|).+?](?=.*\[\/url])', $mode, "link_bbcode");
-		$formatter->lexer->addEntryPattern('\[(?:(?:https?|ftp|feed):\/\/|mailto:)\S+(?=.*])', $mode, "link_wiki");
-	}
-	$formatter->lexer->addExitPattern('&lt;\/a&gt;', "link_html");
-	$formatter->lexer->addExitPattern('\[\/url]', "link_bbcode");
-	$formatter->lexer->addExitPattern(']', "link_wiki");
+	// Emails and links
+	$string = preg_replace("/<a href='mailto:(.*?)'>\\1<\/a>/", "$1", $string);
+	$string = preg_replace("`<a href='" . str_replace("?", "\?", makeLink("post", "(\d+)")) . "'[^>]*>(.*?)<\/a>`", "[post:$1 $2]", $string);
+	$string = preg_replace("`<a href='" . str_replace("?", "\?", makeLink("(\d+)")) . "'[^>]*>(.*?)<\/a>`", "[conversation:$1 $2]", $string);
+	$string = preg_replace("/<a href='(?:\w+:\/\/)?(.*?)'>\\1<\/a>/", "$1", $string);
+	$string = preg_replace("/<a(.*?)>(.*?)<\/a>/", "&lt;a$1&gt;$2&lt;/a&gt;", $string);
+		
+	return $string;
 }
 
 }
@@ -498,6 +602,24 @@ class Formatter_Image {
 
 var $formatter;
 var $modes = array("image_html", "image_bbcode1", "image_bbcode2");
+
+function Formatter_Image(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{	
+	$this->formatter->lexer->mapFunction("image_html", array($this, "image_html"));
+	$this->formatter->lexer->mapFunction("image_bbcode1", array($this, "image_bbcode1"));
+	$this->formatter->lexer->mapFunction("image_bbcode2", array($this, "image_bbcode2"));
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["whitespace"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addSpecialPattern('&lt;img.+?\/?&gt;', $mode, "image_html");
+		$this->formatter->lexer->addSpecialPattern('\[img]https?:\/\/[^\s]+?\[\/img]', $mode, "image_bbcode1");
+		$this->formatter->lexer->addSpecialPattern('\[(?:img|image)[:=]https?:\/\/[^\s]+?]', $mode, "image_bbcode2");
+	}
+}
 
 function image_html($match, $state)
 {
@@ -529,22 +651,15 @@ function image_bbcode2($match, $state)
 
 function image($src, $alt = "", $title = "")
 {
-	$this->formatter->output .= "<img src='$src'" . (!empty($alt) ? " alt='$alt'" : "") . (!empty($title) ? " title='$title'" : "") . "/>";
+	if (!empty($alt)) $altQuote = strpos($alt, "&#39;") === false ? "'" : '"';
+	if (!empty($title)) $titleQuote = strpos($title, "&#39;") === false ? "'" : '"';
+	$this->formatter->output .= "<img src='$src'" . (!empty($alt) ? " alt=$altQuote$alt$altQuote" : "") . (!empty($title) ? " title=$titleQuote$title$titleQuote" : "") . "/>";
 }
 
-function init(&$formatter)
+function revert($string)
 {
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("image_html", array($this, "image_html"));
-	$formatter->lexer->mapFunction("image_bbcode1", array($this, "image_bbcode1"));
-	$formatter->lexer->mapFunction("image_bbcode2", array($this, "image_bbcode2"));
-	$allowedModes = $formatter->getModes($formatter->allowedModes["whitespace"]);
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addSpecialPattern('&lt;img.+?\/?&gt;', $mode, "image_html");
-		$formatter->lexer->addSpecialPattern('\[img]https?:\/\/[^\s]+?\[\/img]', $mode, "image_bbcode1");
-		$formatter->lexer->addSpecialPattern('\[(?:img|image)[:=]https?:\/\/[^\s]+?]', $mode, "image_bbcode2");
-	}
+	$string = preg_replace("/<img(.*?)\/>/", "&lt;img$1&gt;", $string);
+	return $string;
 }
 
 }
@@ -556,6 +671,22 @@ var $modes = array("blockList");
 
 var $listStack = array();
 var $initialDepth = 0;
+
+function Formatter_List(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{
+	$this->formatter->lexer->mapFunction("blockList", array($this, "blockList"));
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addEntryPattern('(?:\n|^) *(?:1[\.\)]|[-*#]) +', $mode, "blockList");
+	}
+	$this->formatter->lexer->addPattern('\n *(?:[0-9][\.\)]|[-*#]) +', "blockList");
+	$this->formatter->lexer->addExitPattern('\n(?! )', "blockList");
+}
 
 function blockList($match, $state) {
 	switch ($state) {
@@ -570,8 +701,9 @@ function blockList($match, $state) {
 		break;
 		case LEXER_EXIT:
 			while ( $list = array_pop($this->listStack) ) {
-				$this->formatter->output .= "</li></{$list[0]}l><p>";
+				$this->formatter->output .= "</li></{$list[0]}l>";
 			}
+			$this->formatter->output .= "<p>";
 		break;
 		case LEXER_MATCHED:
 			$depth = $this->interpretSyntax($match, $listType);
@@ -664,17 +796,66 @@ function interpretSyntax($match, & $type) {
 	return count(explode(' ',str_replace("\t",' ',$match)));
 }
 
-function init(&$formatter)
+function revert($string)
 {
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("blockList", array($this, "blockList"));
-	$allowedModes = $formatter->getModes($formatter->allowedModes["block"]);
+	$this->lexer = &new SimpleLexer($this, "text", true);
+	$allowedModes = array("text", "unorderedList", "orderedList");
 	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addEntryPattern('\n *(?:1[\.\)]|[-*#]) +', $mode, "blockList");
+		$this->lexer->addEntryPattern('<ul>', $mode, "unorderedList");
+		$this->lexer->addEntryPattern('<ol>', $mode, "orderedList");
 	}
-	$formatter->lexer->addPattern('\n *(?:[0-9][\.\)]|[-*#]) +', "blockList");
-	$formatter->lexer->addExitPattern('\n(?! )', "blockList");
+	$this->lexer->addSpecialPattern('<li>', "unorderedList", "uli");
+	$this->lexer->addSpecialPattern('<li>', "orderedList", "oli");
+	$this->lexer->addExitPattern('<\/ul>', "unorderedList");
+	$this->lexer->addExitPattern('<\/ol>', "orderedList");
+	
+	$this->lexer->parse($string);
+	
+	$string = str_replace("</li>", "", $this->output);
+	
+	return $string;
+}
+
+var $listLevel = -1;
+var $listNumbers = array();
+var $firstItem = true;
+
+function uli($match, $state)
+{
+	$this->output .= ($this->firstItem ? "" : "\n") . str_repeat(" ", $this->listLevel) . "- ";
+	$this->firstItem = false;
+	return true;
+}
+function oli($match, $state)
+{
+	$this->listNumbers[$this->listLevel]++;
+	$this->output .= ($this->firstItem ? "" : "\n") . str_repeat(" ", $this->listLevel) . $this->listNumbers[$this->listLevel] . ". ";
+	$this->firstItem = false;
+	return true;
+}
+function unorderedList($match, $state)
+{
+	switch ($state) {
+		case LEXER_ENTER: $this->listLevel++; break;
+		case LEXER_EXIT: $this->listLevel--; if ($this->listLevel == -1) {$this->output .= "\n\n"; $this->firstItem = true;} break;
+		case LEXER_UNMATCHED: $this->output .= $match; break;
+	}
+	return true;
+}
+
+function orderedList($match, $state)
+{
+	switch ($state) {
+		case LEXER_ENTER: $this->listLevel++; $this->listNumbers[$this->listLevel] = 0; break;
+		case LEXER_EXIT: $this->listLevel--; if ($this->listLevel == -1) {$this->output .= "\n\n"; $this->firstItem = true;} break;
+		case LEXER_UNMATCHED: $this->output .= $match; break;
+	}
+	return true;
+}
+
+function text($match, $state) {
+ 	$this->output .= $match;
+ 	return true;
 }
 
 }
@@ -682,6 +863,21 @@ function init(&$formatter)
 class Formatter_Horizontal_Rule {
 
 var $formatter;
+var $revert = array("<hr/>" => "-----\n\n");
+
+function Formatter_Horizontal_Rule(&$formatter)
+{
+	$this->formatter =& $formatter;
+}
+
+function format()
+{
+	$this->formatter->lexer->mapFunction("horizontalRule", array($this, "horizontalRule"));
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addSpecialPattern('(?:\n|^)-{5,}(?=\n|$)', $mode, "horizontalRule");
+	}
+}
 
 function horizontalRule($match, $state)
 {
@@ -689,55 +885,49 @@ function horizontalRule($match, $state)
 	return true;
 }
 
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("horizontalRule", array($this, "horizontalRule"));
-	$allowedModes = $formatter->getModes($formatter->allowedModes["block"]);
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addSpecialPattern('\n-{5,}(?=\n)', $mode, "horizontalRule");
-	}
-
-}
-
 }
 
 class Formatter_Special_Characters {
 
 var $formatter;
+var $characters = array(
+	"-&gt;" => "→",
+	"&lt;-" => "←",
+	"&lt;-&gt;" => "↔",
+	"=&gt;" => "⇒",
+	"&lt;=" => "⇐",
+	"&lt;=&gt;" => "⇔",
+	"&gt;&gt;" => "»",
+	"&lt;&lt;" => "«",
+	"(c)" => "©",
+	"(tm)" => "™",
+	"(r)" => "®",
+	"--" => "–",
+	"..." => "…"
+);
+
+function Formatter_Special_Characters(&$formatter)
+{
+	$this->formatter =& $formatter;
+	$this->revert = array_flip($this->characters);
+}
+
+function format()
+{
+	$this->formatter->lexer->mapFunction("entity", array($this, "entity"));
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"]);
+    
+	$pattern = array();
+	foreach ($this->characters as $k => $v) $pattern[] = preg_quote($k);
+	$pattern = implode("|", $pattern);
+	
+	foreach ($allowedModes as $mode) $this->formatter->lexer->addSpecialPattern($pattern, $mode, "entity");
+}
 
 function entity($match, $state)
 {
-	switch ($match) {
-		case "-&gt;": $this->formatter->output .= "→"; break;
-		case "&lt;-": $this->formatter->output .= "←"; break;
-		case "&lt;-&gt;": $this->formatter->output .= "↔"; break;
-		case "=&gt;": $this->formatter->output .= "⇒"; break;
-		case "&lt;=": $this->formatter->output .= "⇐"; break;
-		case "&lt;=&gt;": $this->formatter->output .= "⇔"; break;
-		case "&gt;&gt;": $this->formatter->output .= "»"; break;
-		case "&lt;&lt;": $this->formatter->output .= "«"; break;
-		case "(c)": $this->formatter->output .= "©"; break;
-		case "(tm)": $this->formatter->output .= "™"; break;
-		case "(r)": $this->formatter->output .= "®"; break;
-		case "--": $this->formatter->output .= "–"; break;
-		case "...": $this->formatter->output .= "…"; break;
-	}
+	if (array_key_exists($match, $this->characters)) $this->formatter->output .= $this->characters[$match];
 	return true;
-}
-
-function init(&$formatter)
-{
-	$this->formatter =& $formatter;
-	
-	$formatter->lexer->mapFunction("entity", array($this, "entity"));
-	$allowedModes = $formatter->getModes($formatter->allowedModes["inline"]);
-    
-	foreach ($allowedModes as $mode) {
-		$formatter->lexer->addSpecialPattern('&lt;-&gt;|-&gt;|&lt;-|&lt;=&gt;|=&gt;|&lt;=|&gt;&gt;|&lt;&lt;|\(c\)|\(tm\)|\(r\)|--(?!-)|\.\.\.', $mode, "entity");
-	}
-
 }
 
 }

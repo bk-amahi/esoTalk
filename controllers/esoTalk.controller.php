@@ -234,13 +234,14 @@ function getStatistics()
 // Check for updates to the esoTalk software
 function checkForUpdates()
 {
-	if ($this->ajax or ($handle = @fopen("http://get.esotalk.com/latestVersion.txt", "r")) === false) return;
+	if ($this->ajax) return;
+	writeConfigFile("config/lastUpdateCheck.php", '$lastUpdateCheck', time());
+	
+	if (($handle = @fopen("http://get.esotalk.com/latestVersion.txt", "r")) === false) return;
 	$latestVersion = fread($handle, 8192);
 	fclose($handle);
-	
+		
 	if (version_compare(ESOTALK_VERSION, $latestVersion) == -1) $this->message("updatesAvailable", false, $latestVersion);
-	
-	writeConfigFile("config/lastUpdateCheck.php", '$lastUpdateCheck', time());
 }
 
 // Register a controller and set it up if need be
