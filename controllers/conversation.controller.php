@@ -146,7 +146,7 @@ function init()
 			$result = $this->esoTalk->db->query("SELECT name, content FROM {$config["tablePrefix"]}posts INNER JOIN {$config["tablePrefix"]}members USING (memberId) WHERE postId=$postId AND conversationId={$this->conversation["id"]}");
 			if (!$this->esoTalk->db->numRows($result)) break;
 			list($member, $content) = $this->esoTalk->db->fetchRow($result);
-			$this->conversation["draft"] = "<blockquote><cite>$member - [post:$postId {$language["go to this post"]}]</cite>" . desanitize($this->formatForEditing($content)) . "</blockquote>";
+			$this->conversation["draft"] = "<blockquote><cite>$member - [post:$postId {$language["go to this post"]}]</cite>" . desanitize($this->formatForEditing($this->removeQuotes($content))) . "</blockquote>";
 		}
 
 		// Edit a post: set the $this->editingPost variable so that the post is outputted with a textarea later on.
@@ -405,14 +405,14 @@ function ajax()
 			list($member, $content) = $this->esoTalk->db->fetchRow($this->esoTalk->db->query("SELECT name, content FROM {$config["tablePrefix"]}posts INNER JOIN {$config["tablePrefix"]}members USING (memberId) WHERE postId=$postId"));
 			return array(
 				"member" => $member . " - [post:$postId {$language["go to this post"]}]",
-				"content" => desanitize($this->formatForEditing($content)),
+				"content" => desanitize($this->formatForEditing($this->removeQuotes($content))),
 			);
 			break;
 
 		// Get the formatted HTML of a string for previewing purposes.
 		case "getPostFormatted":
 			if (empty($_POST["content"])) return;
-			return $this->formatForDisplay($_POST["content"]);
+			return $this->esoTalk->formatter->display($this->formatForDisplay($_POST["content"]));
 			break;
 
 		// Add a member to the membersAllowed list.
@@ -657,7 +657,7 @@ function getPosts($criteria = array())
 			"color" => $post["color"],
 			"account" => $post["account"],
 			"accounts" => $this->esoTalk->canChangeGroup($post["memberId"], $post["account"]),
-			"body" => $post["content"],
+			"body" => $this->esoTalk->formatter->display($post["content"]),
 			"avatar" => $this->esoTalk->getAvatar($post["memberId"], $post["avatarFormat"]),
 			"editMember" => $post["editMember"],
 			"lastAction" => strip_tags($post["lastAction"])
@@ -875,15 +875,13 @@ function getEditArea($postId, $content)
 // Convert a post from HTML back to formatting code.
 function formatForEditing($string)
 {
-	$formatter = new Formatter();
-	return $formatter->revert($string);
+	return $this->esoTalk->formatter->revert($string);
 }
 
 // Convert a post from formatting code into HTML.
 function formatForDisplay($string)
 {
-	$formatter = new Formatter();
-	return $formatter->format($string);
+	return $this->esoTalk->formatter->format($string);
 }
 
 // Validate a post - make sure it's not too long, has at least one character, and check for flooding.
@@ -1311,6 +1309,14 @@ function linkTags($tags)
 	$tags = explode(", ", $tags);
 	foreach ($tags as $k => $tag) $tags[$k] = "<a href='" . makeLink("search", "?q2=tag:$tag") . "'>$tag</a>";
 	return implode(", ", $tags);
+}
+
+// Remove quotes from a post to prevent nested quotes when quoting the post.
+function removeQuotes($post)
+{
+	while (preg_match("`(.*)<blockquote>.*?</blockquote>`", $post))
+		$post = preg_replace("`(.*)<blockquote>.*?</blockquote>`", "$1", $post);
+	return $post;
 }
 
 // Toggle sticky for this conversation.

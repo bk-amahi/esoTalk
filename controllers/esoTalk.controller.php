@@ -45,6 +45,8 @@ function esoTalk()
 		$this->fatalError($config["verboseFatalErrors"] ? $this->db->error() : "");
 	
 	if (!isset($_SESSION["messages"]) or !is_array($_SESSION["messages"])) $_SESSION["messages"] = array();
+	
+	$this->formatter = new Formatter();
 }
 
 // Initialize; connect to the db, log in, prepare page

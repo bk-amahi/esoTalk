@@ -16,7 +16,22 @@ function init()
 	parent::init();
 	
 	$this->esoTalk->addToHead("<style type='text/css'>.emoticon {width:16px; height:16px; background:url({$this->emoticonDir}emoticons.png); background-repeat:no-repeat}</style>");
+	
+	// Add the formatter
+	$this->esoTalk->formatter->addFormatter("emoticons", "Formatter_Emoticons");
+}
 
+}
+
+class Formatter_Emoticons {
+	
+var $formatter;
+var $emoticons = array();
+	
+function Formatter_Emoticons(&$formatter)
+{
+	$this->formatter = &$formatter;
+	
 	// Define emoticons
 	$this->emoticons[":)"] = "<img src='js/x.gif' style='background-position:0 0' alt=':)' class='emoticon'/>";
 	$this->emoticons["=)"] = "<img src='js/x.gif' style='background-position:0 0' alt='=)' class='emoticon'/>";
@@ -80,14 +95,10 @@ function init()
 	$this->emoticons["XD"] = "<img src='js/x.gif' style='background-position:0 -540px' alt='XD' class='emoticon'/>";
 	$this->emoticons["('<"] = "<img src='js/x.gif' style='background-position:0 -560px' alt='(&#39;&lt;' class='emoticon'/>";
 	$this->emoticons["B)"] = "<img src='js/x.gif' style='background-position:0 -580px' alt='B)' class='emoticon'/>";
-	
-	// Add the formatter
-	if ($this->esoTalk->action == "conversation")
-		$this->esoTalk->controller->addHook("getPost", array($this, "parseEmoticons"));
+	$this->emoticons["XP"] = "<img src='js/x.gif' style='background-position:0 -600px' alt='XP' class='emoticon'/>";
 }
 
-// Parse text emoticons into images
-function parseEmoticons(&$controller, &$post, $postData)
+function display($string)
 {
 	$from = $to = array();
 	foreach ($this->emoticons as $k => $v) {
@@ -95,7 +106,8 @@ function parseEmoticons(&$controller, &$post, $postData)
 		$from[] = "/(?<=^|[\s.,!<>]){$k}(?=[\s.,!<>)]|$)/i";
 		$to[] = "$v";
 	}
-	$post["body"] = preg_replace($from, $to, $post["body"]);
+	$string = preg_replace($from, $to, $string);
+	return $string;
 }
 
 }

@@ -17,7 +17,7 @@ var $modes = array();
 var $allowedModes = array(
 	
 	// Modes in which inline-level formatting (bold, italic, links, etc.) can be applied.
-	"inline" => array("text", "quote", "list", "heading", "italic", "bold", "strike", "link", "superscript", "subscript"),
+	"inline" => array("text", "quote", "cite", "list", "heading", "italic", "bold", "strike", "link", "superscript", "subscript"),
 	
 	// Modes in which paragraph-level formatting (whitespace and images) can be applied.
 	"whitespace" => array("text", "quote", "list", "italic", "bold", "strike"),
@@ -51,40 +51,78 @@ function Formatter()
 	);
 }
 
-function format($string)
+function addFormatter($name, $class)
 {
+	$this->modes[$name] = new $class($this);
+}
+
+function format($string, $formatters = false)
+{
+	$this->output = "";
+	
+	// Work out which formatters are going to be used.
+	if (is_array($formatters)) $formatters = array_intersect(array_keys($this->modes), $formatters);
+	else $formatters = array_keys($this->modes);
+	
 	// Clean up newline characters - make sure the only ones we are using are \n!
 	$string = strtr($string, array("\r\n" => "\n", "\r" => "\n")) . "\n";
 	
 	// Set up the lexer with all of the different formatting modes.
-	foreach ($this->modes as $k => $v) {
-		if (method_exists($this->modes[$k], "format")) $this->modes[$k]->format();
+	foreach ($formatters as $v) {
+		if (method_exists($this->modes[$v], "format")) $this->modes[$v]->format();
 	}
 	
 	// Run the lexer!
 	$this->lexer->parse($string);
 	
 	// Run any post-formatting actions.
-	foreach ($this->modes as $k => $v) {
-		if (method_exists($this->modes[$k], "finish")) $this->output = $this->modes[$k]->finish($this->output);
+	foreach ($formatters as $v) {
+		if (method_exists($this->modes[$v], "finish")) $this->output = $this->modes[$v]->finish($this->output);
 	}
 
 	return $this->output;
 }
 
-function revert($string)
+function revert($string, $formatters = false)
 {
+	// Work out which formatters are going to be used.
+	if (is_array($formatters)) $formatters = array_intersect(array_keys($this->modes), $formatters);
+	else $formatters = array_keys($this->modes);
+	
 	// Collect simple reversion patterns from each of the individual formatters.
 	$translations = array();
-	foreach ($this->modes as $k => $v) if (isset($v->revert) and is_array($v->revert)) $translations += $v->revert;
+	foreach ($formatters as $v) {
+		if (isset($this->modes[$v]->revert) and is_array($this->modes[$v]->revert)) $translations += $this->modes[$v]->revert;
+	}
 	$string = strtr($string, $translations);
 
 	// Run any more complex reversions.
-	foreach ($this->modes as $k => $v) {
-		if (method_exists($this->modes[$k], "revert")) $string = $this->modes[$k]->revert($string);
+	foreach ($formatters as $v) {
+		if (method_exists($this->modes[$v], "revert")) $string = $this->modes[$v]->revert($string);
 	}
 	
 	$string = rtrim($string);
+	return $string;
+}
+
+function display($string, $formatters = false)
+{
+	// Work out which formatters are going to be used.
+	if (is_array($formatters)) $formatters = array_intersect(array_keys($this->modes), $formatters);
+	else $formatters = array_keys($this->modes);
+
+	// Collect simple display patterns from each of the individual formatters.
+	$translations = array();
+	foreach ($formatters as $v) {
+		if (isset($this->modes[$v]->display) and is_array($this->modes[$v]->display)) $translations += $this->modes[$v]->display;
+	}
+	$string = strtr($string, $translations);
+
+	// Run any more complex display tasks.
+	foreach ($formatters as $v) {
+		if (method_exists($this->modes[$v], "display")) $string = $this->modes[$v]->display($string);
+	}
+	
 	return $string;
 }
 
@@ -373,6 +411,7 @@ class Formatter_Quote {
 
 var $formatter;
 var $modes = array("quote_html", "quote_bbcode");
+var $revert = array("<blockquote>" => "&lt;blockquote&gt;", "</blockquote>" => "&lt;/blockquote&gt;\n\n", "<cite>" => "&lt;cite&gt;", "</cite>" => "&lt;/cite&gt;");
 
 function Formatter_Quote(&$formatter)
 {
@@ -382,23 +421,42 @@ function Formatter_Quote(&$formatter)
 function format()
 {	
 	$this->formatter->lexer->mapFunction("quote", array($this, "quote"));
+	$this->formatter->lexer->mapFunction("cite", array($this, "cite"));
 	$this->formatter->lexer->mapHandler("quote_html", "quote");
 	$this->formatter->lexer->mapHandler("quote_bbcode", "quote");
 	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
 	foreach ($allowedModes as $mode) {
-		$this->formatter->lexer->addEntryPattern('&lt;blockquote&gt;(?:\s*&lt;cite&gt;(?:.*?)&lt;\/cite&gt;)?(?=.*&lt;\/blockquote&gt;)', $mode, "quote_html");
+		$this->formatter->lexer->addEntryPattern('&lt;blockquote&gt;(?=.*&lt;\/blockquote&gt;)', $mode, "quote_html");
 		$this->formatter->lexer->addEntryPattern('\[quote(?:[:=](?:.*?))?\](?=.*\[\/quote])', $mode, "quote_bbcode");
 	}
 	$this->formatter->lexer->addExitPattern('&lt;\/blockquote&gt;', "quote_html");
 	$this->formatter->lexer->addExitPattern('\[\/quote\]', "quote_bbcode");
+	
+	$this->formatter->lexer->addEntryPattern('&lt;cite&gt;(?=.*&lt;\/cite&gt;)', "quote_html", "cite");
+	$this->formatter->lexer->addExitPattern('&lt;\/cite&gt;', "cite");
+}
+
+function cite($match, $state)
+{
+	switch ($state) {
+		case LEXER_ENTER:
+			$this->formatter->output .= "</p><p><cite>";
+			break;
+		case LEXER_EXIT:
+			$this->formatter->output .= "</cite></p><p>";
+			break;
+		case LEXER_UNMATCHED:
+			$this->formatter->output .= $match;
+			break;
+	}
+	return true;
 }
 
 function quote($match, $state)
 {
 	switch ($state) {
 		case LEXER_ENTER:
-			if (preg_match("`&lt;cite&gt;(.*?)&lt;/cite&gt;|\[quote[:=](.*?)\]`", $match, $matches)) $cite = trim(end($matches));
-			$this->formatter->output .= "</p><blockquote>" . (!empty($cite) ? "<p><cite>$cite</cite></p>" : "") . "<p>";
+			$this->formatter->output .= "</p><blockquote><p>";
 			break;
 		case LEXER_EXIT:
 			$this->formatter->output .= "</p></blockquote><p>\n";
@@ -408,16 +466,6 @@ function quote($match, $state)
 			break;
 	}
 	return true;
-}
-
-function revert($string)
-{
-	$callback = create_function('$match', '
-		return "{$match[1]}&lt;blockquote&gt;" . ($match[2] ? "&lt;cite&gt;{$match[2]}&lt;/cite&gt; " : "") . "{$match[3]}&lt;/blockquote&gt;\n\n";
-	');
-	while (preg_match("/<blockquote>.*?<\/blockquote>/s", $string))
-		$string = preg_replace_callback("/(.*?)<blockquote>(?:<cite>(.+?)<\/cite>)?\n*(.*?)\n*<\/blockquote>/is", $callback, $string);
-	return $string;
 }
 
 }
@@ -517,7 +565,7 @@ function fixedInline($match, $state)
 class Formatter_Link {
 
 var $formatter;
-var $modes = array("link_html", "link_bbcode", "link_wiki");
+var $modes = array("link_html", "link_bbcode", "link_wiki", "postLink");
 
 function Formatter_Link(&$formatter)
 {
@@ -528,19 +576,47 @@ function format()
 {
 	$this->formatter->lexer->mapFunction("link", array($this, "link"));
 	$this->formatter->lexer->mapFunction("url", array($this, "url"));
+	$this->formatter->lexer->mapFunction("email", array($this, "email"));
+	$this->formatter->lexer->mapFunction("postLink", array($this, "postLink"));
 	$this->formatter->lexer->mapHandler("link_html", "link");
 	$this->formatter->lexer->mapHandler("link_bbcode", "link");
 	$this->formatter->lexer->mapHandler("link_wiki", "link");
 	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"], "link");
 	foreach ($allowedModes as $mode) {
-		$this->formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)(?:(?:https?|ftp|feed):\/\/)?(?:[\w\-]+\.)+(?:ac|ad|ae|aero|af|ag|ai|al|am|an|ao|aq|ar|arpa|as|asia|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|biz|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cat|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|com|coop|cr|cu|cv|cx|cy|cz|de|dj|dk|dm|do|dz|ec|edu|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gov|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|info|int|io|iq|ir|is|it|je|jm|jo|jobs|jp|ke|kg|kh|ki|km|kn|kp|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|me|mg|mh|mil|mk|ml|mm|mn|mo|mobi|mp|mq|mr|ms|mt|mu|museum|mv|mw|mx|my|mz|na|name|nc|ne|net|nf|ng|ni|nl|no|np|nr|nu|nz|om|org|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|pro|ps|pt|pw|py|qa|re|ro|rs|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tel|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|travel|tt|tv|tw|tz|ua|ug|uk|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)(?:[^\w\s]\S*?)?(?=[\.,?!]*(?:\s|$)|&#39;|&lt;)', $mode, "url");
+		$this->formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)(?:(?:https?|ftp|feed):\/\/)?(?:[\w\-]+\.)+(?:ac|ad|ae|aero|af|ag|ai|al|am|an|ao|aq|ar|arpa|as|asia|at|au|aw|ax|az|ba|bb|bd|be|bf|bg|bh|bi|biz|bj|bm|bn|bo|br|bs|bt|bv|bw|by|bz|ca|cat|cc|cd|cf|cg|ch|ci|ck|cl|cm|cn|co|com|coop|cr|cu|cv|cx|cy|cz|de|dj|dk|dm|do|dz|ec|edu|ee|eg|er|es|et|eu|fi|fj|fk|fm|fo|fr|ga|gb|gd|ge|gf|gg|gh|gi|gl|gm|gn|gov|gp|gq|gr|gs|gt|gu|gw|gy|hk|hm|hn|hr|ht|hu|id|ie|il|im|in|info|int|io|iq|ir|is|it|je|jm|jo|jobs|jp|ke|kg|kh|ki|km|kn|kp|kr|kw|ky|kz|la|lb|lc|li|lk|lr|ls|lt|lu|lv|ly|ma|mc|md|me|mg|mh|mil|mk|ml|mm|mn|mo|mobi|mp|mq|mr|ms|mt|mu|museum|mv|mw|mx|my|mz|na|name|nc|ne|net|nf|ng|ni|nl|no|np|nr|nu|nz|om|org|pa|pe|pf|pg|ph|pk|pl|pm|pn|pr|pro|ps|pt|pw|py|qa|re|ro|rs|ru|rw|sa|sb|sc|sd|se|sg|sh|si|sj|sk|sl|sm|sn|so|sr|st|su|sv|sy|sz|tc|td|tel|tf|tg|th|tj|tk|tl|tm|tn|to|tp|tr|travel|tt|tv|tw|tz|ua|ug|uk|us|uy|uz|va|vc|ve|vg|vi|vn|vu|wf|ws|ye|yt|yu|za|zm|zw)(?:[^\w\s]\S*?)??(?=[\.,?!]*(?:\s|$)|&#39;|&lt;|\[)', $mode, "url");
 		$this->formatter->lexer->addEntryPattern('&lt;a.+?&gt;(?=.*&lt;\/a&gt;)', $mode, "link_html");
 		$this->formatter->lexer->addEntryPattern('\[url=(?:(?:https?|ftp|feed):\/\/|mailto:|).+?](?=.*\[\/url])', $mode, "link_bbcode");
-		$this->formatter->lexer->addEntryPattern('\[(?:(?:https?|ftp|feed):\/\/|mailto:)\S+(?=.*])', $mode, "link_wiki");
+		$this->formatter->lexer->addEntryPattern('\[(?:(?:https?|ftp|feed):\/\/|mailto:)\S+\s+(?=.*])', $mode, "link_wiki");
+		$this->formatter->lexer->addEntryPattern('\[post:\d+\s+(?=.*])', $mode, "postLink");
+		$this->formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)[\w-\.]+@(?:[\w-]+\.)+[\w-]{2,4}', $mode, "email");
 	}
 	$this->formatter->lexer->addExitPattern('&lt;\/a&gt;', "link_html");
 	$this->formatter->lexer->addExitPattern('\[\/url]', "link_bbcode");
 	$this->formatter->lexer->addExitPattern(']', "link_wiki");
+	$this->formatter->lexer->addExitPattern(']', "postLink");
+}
+
+function email($match, $state)
+{
+	$this->formatter->output .= "<a href='mailto:$match'>$match</a>";
+	return true;
+}
+
+function postLink($match, $state)
+{
+	switch ($state) {
+		case LEXER_ENTER:
+			$postId = rtrim(substr($match, 6));
+			$this->formatter->output .= "<a href='" . makeLink("post", (int)$postId) . "'>";
+			break;
+		case LEXER_EXIT:
+			$this->formatter->output .= "</a>";
+			break;
+		case LEXER_UNMATCHED:
+			$this->formatter->output .= $match;
+			break;
+	}
+	return true;
 }
 
 function url($match, $state)
@@ -569,7 +645,7 @@ function link($match, $state)
 				if (preg_match("`title=(&#39;|&quot;)(.+?)\\1`", $match, $titleMatch)) $title = $titleMatch[2];
 				if (!empty($title)) $quote = strpos($title, "&#39;") === false ? "'" : '"';
 			} elseif (substr($match, 0, 5) == "[url=") $link = substr($match, 5, -1);
-			else $link = substr($match, 1);
+			else $link = rtrim(substr($match, 1));
 			$protocol = "";
 			if (!preg_match("`^((?:https?|ftp|feed)://|mailto:)`i", $link)) $protocol = "http://";
 			$this->formatter->output .= "<a href='$protocol$link'" . (isset($title) ? " title=$quote$title$quote" : "") . ">";
@@ -796,6 +872,7 @@ function interpretSyntax($match, & $type) {
 	return count(explode(' ',str_replace("\t",' ',$match)));
 }
 
+var $output;
 function revert($string)
 {
 	$this->lexer = &new SimpleLexer($this, "text", true);
@@ -891,12 +968,12 @@ class Formatter_Special_Characters {
 
 var $formatter;
 var $characters = array(
+	"&lt;-&gt;" => "↔",
 	"-&gt;" => "→",
 	"&lt;-" => "←",
-	"&lt;-&gt;" => "↔",
+	"&lt;=&gt;" => "⇔",
 	"=&gt;" => "⇒",
 	"&lt;=" => "⇐",
-	"&lt;=&gt;" => "⇔",
 	"&gt;&gt;" => "»",
 	"&lt;&lt;" => "«",
 	"(c)" => "©",
