@@ -53,7 +53,7 @@ function Formatter()
 
 function addFormatter($name, $class)
 {
-	$this->modes[$name] = new $class($this);
+	$this->modes = array($name => new $class($this)) + $this->modes;
 }
 
 function format($string, $formatters = false)
@@ -102,27 +102,6 @@ function revert($string, $formatters = false)
 	}
 	
 	$string = rtrim($string);
-	return $string;
-}
-
-function display($string, $formatters = false)
-{
-	// Work out which formatters are going to be used.
-	if (is_array($formatters)) $formatters = array_intersect(array_keys($this->modes), $formatters);
-	else $formatters = array_keys($this->modes);
-
-	// Collect simple display patterns from each of the individual formatters.
-	$translations = array();
-	foreach ($formatters as $v) {
-		if (isset($this->modes[$v]->display) and is_array($this->modes[$v]->display)) $translations += $this->modes[$v]->display;
-	}
-	$string = strtr($string, $translations);
-
-	// Run any more complex display tasks.
-	foreach ($formatters as $v) {
-		if (method_exists($this->modes[$v], "display")) $string = $this->modes[$v]->display($string);
-	}
-	
 	return $string;
 }
 
@@ -323,7 +302,7 @@ class Formatter_Superscript {
 
 var $formatter;
 var $modes = array("superscript", "subscript");
-var $revert = array("<sup>" => "&lt;sup&gt;", "</sup>" => "&lt;/sup&gt;", "<sub>" => "&lt;s&gt;", "</sub>" => "&lt;/s&gt;");
+var $revert = array("<sup>" => "&lt;sup&gt;", "</sup>" => "&lt;/sup&gt;", "<sub>" => "&lt;sub&gt;", "</sub>" => "&lt;/sub&gt;");
 
 function Formatter_Superscript(&$formatter)
 {
@@ -411,7 +390,14 @@ class Formatter_Quote {
 
 var $formatter;
 var $modes = array("quote_html", "quote_bbcode");
-var $revert = array("<blockquote>" => "&lt;blockquote&gt;", "</blockquote>" => "&lt;/blockquote&gt;\n\n", "<cite>" => "&lt;cite&gt;", "</cite>" => "&lt;/cite&gt;");
+var $revert = array(
+	"<blockquote>" => "\n&lt;blockquote&gt;",
+	"<blockquote><p>" => "\n&lt;blockquote&gt;",
+	"</blockquote>" => "\n&lt;/blockquote&gt;\n\n",
+	"</p></blockquote>" => "\n&lt;/blockquote&gt;\n\n",
+	"<p><cite>" => "&lt;cite&gt;",
+	"</cite></p>" => "&lt;/cite&gt;\n",
+);
 
 function Formatter_Quote(&$formatter)
 {
@@ -489,9 +475,9 @@ function format()
 	$this->formatter->lexer->mapHandler("code_bbcode_block", "fixedBlock");
 	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
 	foreach ($allowedModes as $mode) {
-		$this->formatter->lexer->addEntryPattern('\n&lt;pre&gt;(?=.*&lt;\/pre&gt;)', $mode, "pre_html_block");
-		$this->formatter->lexer->addEntryPattern('\n&lt;code&gt;(?=.*&lt;\/code&gt;)', $mode, "code_html_block");
-		$this->formatter->lexer->addEntryPattern('\n\[code\](?=.*\[\/code])', $mode, "code_bbcode_block");
+		$this->formatter->lexer->addEntryPattern('(?:\n|^)&lt;pre&gt;(?=.*&lt;\/pre&gt;)', $mode, "pre_html_block");
+		$this->formatter->lexer->addEntryPattern('(?:\n|^)&lt;code&gt;(?=.*&lt;\/code&gt;)', $mode, "code_html_block");
+		$this->formatter->lexer->addEntryPattern('(?:\n|^)\[code\](?=.*\[\/code\])', $mode, "code_bbcode_block");
 	}
 	$this->formatter->lexer->addExitPattern('&lt;\/pre&gt;', "pre_html_block");
 	$this->formatter->lexer->addExitPattern('&lt;\/code&gt;', "code_html_block");
@@ -940,7 +926,7 @@ function text($match, $state) {
 class Formatter_Horizontal_Rule {
 
 var $formatter;
-var $revert = array("<hr/>" => "-----\n\n");
+var $revert = array("<hr/>" => "-----");
 
 function Formatter_Horizontal_Rule(&$formatter)
 {
@@ -952,7 +938,7 @@ function format()
 	$this->formatter->lexer->mapFunction("horizontalRule", array($this, "horizontalRule"));
 	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["block"]);
 	foreach ($allowedModes as $mode) {
-		$this->formatter->lexer->addSpecialPattern('(?:\n|^)-{5,}(?=\n|$)', $mode, "horizontalRule");
+		$this->formatter->lexer->addSpecialPattern('(?:\n|^)(?:-{5,}|&lt;hr\/?&gt;)(?=\n|$)', $mode, "horizontalRule");
 	}
 }
 
@@ -995,7 +981,10 @@ function format()
 	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"]);
     
 	$pattern = array();
-	foreach ($this->characters as $k => $v) $pattern[] = preg_quote($k);
+	foreach ($this->characters as $k => $v) {
+		if ($k == "--") $pattern[] = "--(?!-)";
+		else $pattern[] = preg_quote($k);
+	}
 	$pattern = implode("|", $pattern);
 	
 	foreach ($allowedModes as $mode) $this->formatter->lexer->addSpecialPattern($pattern, $mode, "entity");

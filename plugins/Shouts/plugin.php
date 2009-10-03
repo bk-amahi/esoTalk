@@ -156,7 +156,7 @@ function htmlShout($shout)
 		$output .= "<div class='controls'><a href='" . makeLink("profile", $this->member["memberId"], "?deleteShout={$shout["shoutId"]}") . "' onclick='Shouts.deleteShout({$shout["shoutId"]});return false'>{$language["delete"]}</a></div>";
 		
 	// Finally, the shout content.
-	$output .= "<p>" . $this->esoTalk->formatter->display($shout["content"], array("emoticons")) . "</p>
+	$output .= "<p>{$shout["content"]}</p>
 </div></div>";
 	return $output;
 }
@@ -177,7 +177,7 @@ function addShout($content)
 		"memberTo" => $this->member["memberId"],
 		"memberFrom" => $this->esoTalk->user["memberId"],
 		"time" => time(),
-		"content" => $this->esoTalk->formatter->format($content, array("bold", "italic", "strikethrough", "superscript", "link", "fixedInline", "specialCharacters"))
+		"content" => $this->esoTalk->formatter->format($content, array("bold", "italic", "strikethrough", "superscript", "link", "fixedInline", "specialCharacters", "emoticons"))
 	);
 		
 	$this->esoTalk->db->query("INSERT INTO {$config["tablePrefix"]}shouts (memberTo, memberFrom, time, content) VALUES ({$shout["memberTo"]}, {$shout["memberFrom"]}, {$shout["time"]}, '" . addslashes($shout["content"]) . "')");

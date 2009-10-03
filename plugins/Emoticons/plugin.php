@@ -19,6 +19,7 @@ function init()
 	
 	// Add the formatter
 	$this->esoTalk->formatter->addFormatter("emoticons", "Formatter_Emoticons");
+	
 }
 
 }
@@ -98,16 +99,27 @@ function Formatter_Emoticons(&$formatter)
 	$this->emoticons["XP"] = "<img src='js/x.gif' style='background-position:0 -600px' alt='XP' class='emoticon'/>";
 }
 
-function display($string)
+function emoticon($match, $state)
 {
-	$from = $to = array();
-	foreach ($this->emoticons as $k => $v) {
-		$k = preg_quote(sanitize($k), "/");
-		$from[] = "/(?<=^|[\s.,!<>]){$k}(?=[\s.,!<>)]|$)/i";
-		$to[] = "$v";
+	$this->formatter->output .= $this->emoticons[desanitize($match)];
+	return true;
+}
+
+function format()
+{
+	$patterns = array();
+	foreach ($this->emoticons as $k => $v) $patterns[] = preg_quote(sanitize($k), "/");
+	
+	$this->formatter->lexer->mapFunction("emoticon", array($this, "emoticon"));
+	$allowedModes = $this->formatter->getModes($this->formatter->allowedModes["inline"]);
+	foreach ($allowedModes as $mode) {
+		$this->formatter->lexer->addSpecialPattern('(?<=^|[\s.,!<>])(?:' . implode("|", $patterns) . ')(?=[\s.,!<>)]|$)', $mode, "emoticon");
 	}
-	$string = preg_replace($from, $to, $string);
-	return $string;
+}
+
+function revert($string)
+{
+	return strtr($string, array_flip($this->emoticons));
 }
 
 }

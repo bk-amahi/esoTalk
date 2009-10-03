@@ -412,7 +412,7 @@ function ajax()
 		// Get the formatted HTML of a string for previewing purposes.
 		case "getPostFormatted":
 			if (empty($_POST["content"])) return;
-			return $this->esoTalk->formatter->display($this->formatForDisplay($_POST["content"]));
+			return $this->formatForDisplay($_POST["content"]);
 			break;
 
 		// Add a member to the membersAllowed list.
@@ -657,7 +657,7 @@ function getPosts($criteria = array())
 			"color" => $post["color"],
 			"account" => $post["account"],
 			"accounts" => $this->esoTalk->canChangeGroup($post["memberId"], $post["account"]),
-			"body" => $this->esoTalk->formatter->display($post["content"]),
+			"body" => $post["content"],
 			"avatar" => $this->esoTalk->getAvatar($post["memberId"], $post["avatarFormat"]),
 			"editMember" => $post["editMember"],
 			"lastAction" => strip_tags($post["lastAction"])
