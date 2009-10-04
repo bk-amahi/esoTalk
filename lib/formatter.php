@@ -551,7 +551,7 @@ function fixedInline($match, $state)
 class Formatter_Link {
 
 var $formatter;
-var $modes = array("link_html", "link_bbcode", "link_wiki", "postLink");
+var $modes = array("link_html", "link_bbcode", "link_wiki", "postLink", "conversationLink");
 
 function Formatter_Link(&$formatter)
 {
@@ -564,6 +564,7 @@ function format()
 	$this->formatter->lexer->mapFunction("url", array($this, "url"));
 	$this->formatter->lexer->mapFunction("email", array($this, "email"));
 	$this->formatter->lexer->mapFunction("postLink", array($this, "postLink"));
+	$this->formatter->lexer->mapFunction("conversationLink", array($this, "conversationLink"));
 	$this->formatter->lexer->mapHandler("link_html", "link");
 	$this->formatter->lexer->mapHandler("link_bbcode", "link");
 	$this->formatter->lexer->mapHandler("link_wiki", "link");
@@ -574,12 +575,14 @@ function format()
 		$this->formatter->lexer->addEntryPattern('\[url=(?:(?:https?|ftp|feed):\/\/|mailto:|).+?](?=.*\[\/url])', $mode, "link_bbcode");
 		$this->formatter->lexer->addEntryPattern('\[(?:(?:https?|ftp|feed):\/\/|mailto:)\S+\s+(?=.*])', $mode, "link_wiki");
 		$this->formatter->lexer->addEntryPattern('\[post:\d+\s+(?=.*])', $mode, "postLink");
+		$this->formatter->lexer->addEntryPattern('\[conversation:\d+\s+(?=.*])', $mode, "conversationLink");
 		$this->formatter->lexer->addSpecialPattern('(?<=[\s>(]|^)[\w-\.]+@(?:[\w-]+\.)+[\w-]{2,4}', $mode, "email");
 	}
 	$this->formatter->lexer->addExitPattern('&lt;\/a&gt;', "link_html");
 	$this->formatter->lexer->addExitPattern('\[\/url]', "link_bbcode");
 	$this->formatter->lexer->addExitPattern(']', "link_wiki");
 	$this->formatter->lexer->addExitPattern(']', "postLink");
+	$this->formatter->lexer->addExitPattern(']', "conversationLink");
 }
 
 function email($match, $state)
@@ -594,6 +597,23 @@ function postLink($match, $state)
 		case LEXER_ENTER:
 			$postId = rtrim(substr($match, 6));
 			$this->formatter->output .= "<a href='" . makeLink("post", (int)$postId) . "'>";
+			break;
+		case LEXER_EXIT:
+			$this->formatter->output .= "</a>";
+			break;
+		case LEXER_UNMATCHED:
+			$this->formatter->output .= $match;
+			break;
+	}
+	return true;
+}
+
+function conversationLink($match, $state)
+{
+	switch ($state) {
+		case LEXER_ENTER:
+			$conversationId = rtrim(substr($match, 14));
+			$this->formatter->output .= "<a href='" . makeLink((int)$conversationId) . "'>";
 			break;
 		case LEXER_EXIT:
 			$this->formatter->output .= "</a>";
